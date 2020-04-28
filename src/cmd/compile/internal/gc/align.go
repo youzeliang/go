@@ -5,8 +5,9 @@
 package gc
 
 import (
-	"cmd/compile/internal/types"
 	"sort"
+
+	"github.com/youzeliang/go/src/cmd/compile/internal/types"
 )
 
 // sizeCalculationDisabled indicates whether it is safe
@@ -180,9 +181,7 @@ func widstruct(errtype *types.Type, t *types.Type, o int64, flag int) int64 {
 func dowidth(t *types.Type) {
 	// Calling dowidth when typecheck tracing enabled is not safe.
 	// See issue #33658.
-	if enableTrace && skipDowidthForTracing {
-		return
-	}
+
 	if Widthptr == 0 {
 		Fatalf("dowidth without betypeinit")
 	}

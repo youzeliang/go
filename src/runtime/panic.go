@@ -83,6 +83,8 @@ func panicCheck2(err string) {
 // a space-minimal register calling convention.
 
 // failures in the comparisons for s[x], 0 <= x < y (y == len(s))
+
+// Go 语言运行时在发现数组、切片和字符串的越界操作会由运行时的 panicIndex 和 runtime.goPanicIndex 函数触发程序的运行时错误并导致崩溃退出：
 func goPanicIndex(x int, y int) {
 	panicCheck1(getcallerpc(), "index out of range")
 	panic(boundsError{x: int64(x), signed: true, y: y, code: boundsIndex})
