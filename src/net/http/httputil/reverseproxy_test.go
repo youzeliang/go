@@ -277,6 +277,39 @@ func TestXForwardedFor(t *testing.T) {
 	}
 }
 
+// Issue 38079: don't append to X-Forwarded-For if it's present but nil
+func TestXForwardedFor_Omit(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get("X-Forwarded-For"); v != "" {
+			t.Errorf("got X-Forwarded-For header: %q", v)
+		}
+		w.Write([]byte("hi"))
+	}))
+	defer backend.Close()
+	backendURL, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyHandler := NewSingleHostReverseProxy(backendURL)
+	frontend := httptest.NewServer(proxyHandler)
+	defer frontend.Close()
+
+	oldDirector := proxyHandler.Director
+	proxyHandler.Director = func(r *http.Request) {
+		r.Header["X-Forwarded-For"] = nil
+		oldDirector(r)
+	}
+
+	getReq, _ := http.NewRequest("GET", frontend.URL, nil)
+	getReq.Host = "some-name"
+	getReq.Close = true
+	res, err := frontend.Client().Do(getReq)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	res.Body.Close()
+}
+
 var proxyQueryTests = []struct {
 	baseSuffix string // suffix to add to backend URL
 	reqSuffix  string // suffix to add to frontend's request URL
@@ -1191,13 +1224,22 @@ func TestReverseProxyWebSocketCancelation(t *testing.T) {
 
 		for i := 0; i < n; i++ {
 			if _, err := bufrw.WriteString(nthResponse(i)); err != nil {
-				t.Errorf("Writing response #%d failed: %v", i, err)
+				select {
+				case <-triggerCancelCh:
+				default:
+					t.Errorf("Writing response #%d failed: %v", i, err)
+				}
+				return
 			}
 			bufrw.Flush()
 			time.Sleep(time.Second)
 		}
 		if _, err := bufrw.WriteString(terminalMsg); err != nil {
-			t.Errorf("Failed to write terminal message: %v", err)
+			select {
+			case <-triggerCancelCh:
+			default:
+				t.Errorf("Failed to write terminal message: %v", err)
+			}
 		}
 		bufrw.Flush()
 	}))
@@ -1324,11 +1366,38 @@ func TestSingleJoinSlash(t *testing.T) {
 	}
 	for _, tt := range tests {
 		if got := singleJoiningSlash(tt.slasha, tt.slashb); got != tt.expected {
-			t.Errorf("singleJoiningSlash(%s,%s) want %s got %s",
+			t.Errorf("singleJoiningSlash(%q,%q) want %q got %q",
 				tt.slasha,
 				tt.slashb,
 				tt.expected,
 				got)
+		}
+	}
+}
+
+func TestJoinURLPath(t *testing.T) {
+	tests := []struct {
+		a        *url.URL
+		b        *url.URL
+		wantPath string
+		wantRaw  string
+	}{
+		{&url.URL{Path: "/a/b"}, &url.URL{Path: "/c"}, "/a/b/c", ""},
+		{&url.URL{Path: "/a/b", RawPath: "badpath"}, &url.URL{Path: "c"}, "/a/b/c", "/a/b/c"},
+		{&url.URL{Path: "/a/b", RawPath: "/a%2Fb"}, &url.URL{Path: "/c"}, "/a/b/c", "/a%2Fb/c"},
+		{&url.URL{Path: "/a/b", RawPath: "/a%2Fb"}, &url.URL{Path: "/c"}, "/a/b/c", "/a%2Fb/c"},
+		{&url.URL{Path: "/a/b/", RawPath: "/a%2Fb%2F"}, &url.URL{Path: "c"}, "/a/b//c", "/a%2Fb%2F/c"},
+		{&url.URL{Path: "/a/b/", RawPath: "/a%2Fb/"}, &url.URL{Path: "/c/d", RawPath: "/c%2Fd"}, "/a/b/c/d", "/a%2Fb/c%2Fd"},
+	}
+
+	for _, tt := range tests {
+		p, rp := joinURLPath(tt.a, tt.b)
+		if p != tt.wantPath || rp != tt.wantRaw {
+			t.Errorf("joinURLPath(URL(%q,%q),URL(%q,%q)) want (%q,%q) got (%q,%q)",
+				tt.a.Path, tt.a.RawPath,
+				tt.b.Path, tt.b.RawPath,
+				tt.wantPath, tt.wantRaw,
+				p, rp)
 		}
 	}
 }

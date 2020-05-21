@@ -349,9 +349,6 @@ type sudog struct {
 
 	g *g
 
-	// isSelect indicates g is participating in a select, so
-	// g.selectDone must be CAS'd to win the wake-up race.
-	isSelect bool
 	next     *sudog
 	prev     *sudog
 	elem     unsafe.Pointer // data element (may point to stack)
@@ -364,6 +361,11 @@ type sudog struct {
 	acquiretime int64
 	releasetime int64
 	ticket      uint32
+
+	// isSelect indicates g is participating in a select, so
+	// g.selectDone must be CAS'd to win the wake-up race.
+	isSelect bool
+
 	parent      *sudog // semaRoot binary tree
 	waitlink    *sudog // g.waiting list or semaRoot
 	waittail    *sudog // semaRoot
@@ -971,7 +973,7 @@ const (
 	waitReasonChanReceive                             // "chan receive"
 	waitReasonChanSend                                // "chan send"
 	waitReasonFinalizerWait                           // "finalizer wait"
-	waitReasonForceGGIdle                             // "force gc (idle)"
+	waitReasonForceGCIdle                             // "force gc (idle)"
 	waitReasonSemacquire                              // "semacquire"
 	waitReasonSleep                                   // "sleep"
 	waitReasonSyncCondWait                            // "sync.Cond.Wait"
@@ -980,6 +982,7 @@ const (
 	waitReasonWaitForGCCycle                          // "wait for GC cycle"
 	waitReasonGCWorkerIdle                            // "GC worker (idle)"
 	waitReasonPreempted                               // "preempted"
+	waitReasonDebugCall                               // "debug call"
 )
 
 var waitReasonStrings = [...]string{
@@ -1000,7 +1003,7 @@ var waitReasonStrings = [...]string{
 	waitReasonChanReceive:           "chan receive",
 	waitReasonChanSend:              "chan send",
 	waitReasonFinalizerWait:         "finalizer wait",
-	waitReasonForceGGIdle:           "force gc (idle)",
+	waitReasonForceGCIdle:           "force gc (idle)",
 	waitReasonSemacquire:            "semacquire",
 	waitReasonSleep:                 "sleep",
 	waitReasonSyncCondWait:          "sync.Cond.Wait",
@@ -1009,6 +1012,7 @@ var waitReasonStrings = [...]string{
 	waitReasonWaitForGCCycle:        "wait for GC cycle",
 	waitReasonGCWorkerIdle:          "GC worker (idle)",
 	waitReasonPreempted:             "preempted",
+	waitReasonDebugCall:             "debug call",
 }
 
 func (w waitReason) String() string {
