@@ -888,6 +888,7 @@ func reflectcallSave(p *_panic, fn, arg unsafe.Pointer, argsize uint32) {
 }
 
 // The implementation of the predeclared function panic.
+// 预定义函数 panic 的实现
 func gopanic(e interface{}) {
 	gp := getg()
 	if gp.m.curg != gp {
