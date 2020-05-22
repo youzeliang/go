@@ -452,7 +452,6 @@ func addSpecial(a, b, c uint32) (uint32, uint32, uint32) {
 	return a, b, c
 }
 
-
 // Divide -> shift rules usually require fixup for negative inputs.
 // If the input is non-negative, make sure the fixup is eliminated.
 func divInt(v int64) int64 {

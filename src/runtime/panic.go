@@ -5,9 +5,10 @@
 package runtime
 
 import (
-	"runtime/internal/atomic"
-	"runtime/internal/sys"
 	"unsafe"
+
+	"github.com/youzeliang/go/src/runtime/internal/atomic"
+	"github.com/youzeliang/go/src/runtime/internal/sys"
 )
 
 // We have two different ways of doing defers. The older way involves creating a
