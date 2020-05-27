@@ -917,7 +917,7 @@ type _panic struct {
 	pc        uintptr        // where to return to in runtime if this panic is bypassed
 	sp        unsafe.Pointer // where to return to in runtime if this panic is bypassed
 	recovered bool           // whether this panic is over
-	aborted   bool           // the panic was aborted
+	aborted   bool           // the panic was aborted   当前的 panic 是否被强行终止；
 	goexit    bool
 }
 

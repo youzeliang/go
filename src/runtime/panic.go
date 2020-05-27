@@ -941,6 +941,8 @@ func gopanic(e interface{}) {
 		// If defer was started by earlier panic or Goexit (and, since we're back here, that triggered a new panic),
 		// take defer off list. An earlier panic will not continue running, but we will make sure below that an
 		// earlier Goexit does continue running.
+		// 如果触发 defer 的 panic 是在前一个 panic 或者 Goexit 的 defer 中触发的，那么将前一个 defer 从列表中去除。前一个 panic 或者 Goexit 将不再继续执行。
+
 		if d.started {
 			if d._panic != nil {
 				d._panic.aborted = true
@@ -968,6 +970,7 @@ func gopanic(e interface{}) {
 		// will find d in the list and will mark d._panic (this panic) aborted.
 		d._panic = (*_panic)(noescape(unsafe.Pointer(&p)))
 
+		// 将 defer 标记为 started，但是保留在列表上，这样，如果在 reflectcall 开始执行 d.fn 之前发生了堆栈增长或垃圾回收，则 traceback 可以找到并更新 defer 的参数帧。
 		done := true
 		if d.openDefer {
 			done = runOpenDeferFrame(gp, d)
@@ -1092,6 +1095,9 @@ func gorecover(argp uintptr) interface{} {
 	// p.argp is the argument pointer of that topmost deferred function call.
 	// Compare against argp reported by caller.
 	// If they match, the caller is the one who can recover.
+	// 在处理 panic 的时候，recover 函数的调用必须放在 defer 的顶层处理函数中。
+	// p.argp 是最顶层的延迟函数调用的参数指针，与调用方传递的argp进行比较，如果一致，则该调用方是可以恢复的。
+
 	gp := getg()
 	p := gp._panic
 	if p != nil && !p.goexit && !p.recovered && argp == uintptr(p.argp) {
@@ -1137,6 +1143,8 @@ var paniclk mutex
 // Unwind the stack after a deferred function calls recover
 // after a panic. Then arrange to continue running as though
 // the caller of the deferred function returned normally.
+// 在 panic 后，在延迟函数中调用 recover 的时候，将回溯堆栈，并且继续执行，就像延迟函数的调用者正常返回一样。
+
 func recovery(gp *g) {
 	// Info about defer passed in G struct.
 	sp := gp.sigcode0
@@ -1151,6 +1159,7 @@ func recovery(gp *g) {
 	// Make the deferproc for this d return again,
 	// this time returning 1. The calling function will
 	// jump to the standard return epilogue.
+	// 让延迟函数的 deferproc 再次返回，这次返回 1 。调用函数将跳转到标准返回结尾。
 	gp.sched.sp = sp
 	gp.sched.pc = pc
 	gp.sched.lr = 0
