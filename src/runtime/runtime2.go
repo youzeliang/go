@@ -768,6 +768,12 @@ type schedt struct {
 
 	procresizetime int64 // nanotime() of last change to gomaxprocs
 	totaltime      int64 // ∫gomaxprocs dt up to procresizetime
+
+	// sysmonlock protects sysmon's actions on the runtime.
+	//
+	// Acquire and hold this mutex to block sysmon from interacting
+	// with the rest of the runtime.
+	sysmonlock mutex
 }
 
 // Values for the flags field of a sigTabT.
