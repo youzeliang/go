@@ -259,12 +259,15 @@ func slicecopy(toPtr unsafe.Pointer, toLen int, fromPtr unsafe.Pointer, fromLen 
 	}
 
 	size := uintptr(n) * width
+	// 如果开启了竞争检测
 	if raceenabled {
 		callerpc := getcallerpc()
 		pc := funcPC(slicecopy)
 		racereadrangepc(fromPtr, size, callerpc, pc)
 		racewriterangepc(toPtr, size, callerpc, pc)
 	}
+	// 如果开启了 The memory sanitizer (msan)
+
 	if msanenabled {
 		msanread(fromPtr, size)
 		msanwrite(toPtr, size)
