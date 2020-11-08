@@ -213,28 +213,72 @@ var testingOnlyForceDowngradeCanary bool
 
 // ConnectionState records basic TLS details about the connection.
 type ConnectionState struct {
-	Version                     uint16                // TLS version used by the connection (e.g. VersionTLS12)
-	HandshakeComplete           bool                  // TLS handshake is complete
-	DidResume                   bool                  // connection resumes a previous TLS connection
-	CipherSuite                 uint16                // cipher suite in use (TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, ...)
-	NegotiatedProtocol          string                // negotiated next protocol (not guaranteed to be from Config.NextProtos)
-	NegotiatedProtocolIsMutual  bool                  // negotiated protocol was advertised by server (client side only)
-	ServerName                  string                // server name requested by client, if any
-	PeerCertificates            []*x509.Certificate   // certificate chain presented by remote peer
-	VerifiedChains              [][]*x509.Certificate // verified chains built from PeerCertificates
-	SignedCertificateTimestamps [][]byte              // SCTs from the peer, if any
-	OCSPResponse                []byte                // stapled OCSP response from peer, if any
+	// Version is the TLS version used by the connection (e.g. VersionTLS12).
+	Version uint16
+
+	// HandshakeComplete is true if the handshake has concluded.
+	HandshakeComplete bool
+
+	// DidResume is true if this connection was successfully resumed from a
+	// previous session with a session ticket or similar mechanism.
+	DidResume bool
+
+	// CipherSuite is the cipher suite negotiated for the connection (e.g.
+	// TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_AES_128_GCM_SHA256).
+	CipherSuite uint16
+
+	// NegotiatedProtocol is the application protocol negotiated with ALPN.
+	//
+	// Note that on the client side, this is currently not guaranteed to be from
+	// Config.NextProtos.
+	NegotiatedProtocol string
+
+	// NegotiatedProtocolIsMutual used to indicate a mutual NPN negotiation.
+	//
+	// Deprecated: this value is always true.
+	NegotiatedProtocolIsMutual bool
+
+	// ServerName is the value of the Server Name Indication extension sent by
+	// the client. It's available both on the server and on the client side.
+	ServerName string
+
+	// PeerCertificates are the parsed certificates sent by the peer, in the
+	// order in which they were sent. The first element is the leaf certificate
+	// that the connection is verified against.
+	//
+	// On the client side, it can't be empty. On the server side, it can be
+	// empty if Config.ClientAuth is not RequireAnyClientCert or
+	// RequireAndVerifyClientCert.
+	PeerCertificates []*x509.Certificate
+
+	// VerifiedChains is a list of one or more chains where the first element is
+	// PeerCertificates[0] and the last element is from Config.RootCAs (on the
+	// client side) or Config.ClientCAs (on the server side).
+	//
+	// On the client side, it's set if Config.InsecureSkipVerify is false. On
+	// the server side, it's set if Config.ClientAuth is VerifyClientCertIfGiven
+	// (and the peer provided a certificate) or RequireAndVerifyClientCert.
+	VerifiedChains [][]*x509.Certificate
+
+	// SignedCertificateTimestamps is a list of SCTs provided by the peer
+	// through the TLS handshake for the leaf certificate, if any.
+	SignedCertificateTimestamps [][]byte
+
+	// OCSPResponse is a stapled Online Certificate Status Protocol (OCSP)
+	// response provided by the peer for the leaf certificate, if any.
+	OCSPResponse []byte
+
+	// TLSUnique contains the "tls-unique" channel binding value (see RFC 5929,
+	// Section 3). This value will be nil for TLS 1.3 connections and for all
+	// resumed connections.
+	//
+	// Deprecated: there are conditions in which this value might not be unique
+	// to a connection. See the Security Considerations sections of RFC 5705 and
+	// RFC 7627, and https://mitls.org/pages/attacks/3SHAKE#channelbindings.
+	TLSUnique []byte
 
 	// ekm is a closure exposed via ExportKeyingMaterial.
 	ekm func(label string, context []byte, length int) ([]byte, error)
-
-	// TLSUnique contains the "tls-unique" channel binding value (see RFC
-	// 5929, section 3). For resumed sessions this value will be nil
-	// because resumption does not include enough context (see
-	// https://mitls.org/pages/attacks/3SHAKE#channelbindings). This will
-	// change in future versions of Go once the TLS master-secret fix has
-	// been standardized and implemented. It is not defined in TLS 1.3.
-	TLSUnique []byte
 }
 
 // ExportKeyingMaterial returns length bytes of exported key material in a new
@@ -250,10 +294,26 @@ func (cs *ConnectionState) ExportKeyingMaterial(label string, context []byte, le
 type ClientAuthType int
 
 const (
+	// NoClientCert indicates that no client certificate should be requested
+	// during the handshake, and if any certificates are sent they will not
+	// be verified.
 	NoClientCert ClientAuthType = iota
+	// RequestClientCert indicates that a client certificate should be requested
+	// during the handshake, but does not require that the client send any
+	// certificates.
 	RequestClientCert
+	// RequireAnyClientCert indicates that a client certificate should be requested
+	// during the handshake, and that at least one certificate is required to be
+	// sent by the client, but that certificate is not required to be valid.
 	RequireAnyClientCert
+	// VerifyClientCertIfGiven indicates that a client certificate should be requested
+	// during the handshake, but does not require that the client sends a
+	// certificate. If the client does send a certificate it is required to be
+	// valid.
 	VerifyClientCertIfGiven
+	// RequireAndVerifyClientCert indicates that a client certificate should be requested
+	// during the handshake, and that at least one valid certificate is required
+	// to be sent by the client.
 	RequireAndVerifyClientCert
 )
 
@@ -278,6 +338,8 @@ type ClientSessionState struct {
 	serverCertificates []*x509.Certificate   // Certificate chain presented by the server
 	verifiedChains     [][]*x509.Certificate // Certificate chains we built for verification
 	receivedAt         time.Time             // When the session ticket was received from the server
+	ocspResponse       []byte                // Stapled OCSP response presented by the server
+	scts               [][]byte              // SCTs presented by the server
 
 	// TLS 1.3 fields.
 	nonce  []byte    // Ticket nonce sent by the server, to derive PSK
@@ -554,12 +616,12 @@ type Config struct {
 	// by the policy in ClientAuth.
 	ClientCAs *x509.CertPool
 
-	// InsecureSkipVerify controls whether a client verifies the
-	// server's certificate chain and host name.
-	// If InsecureSkipVerify is true, TLS accepts any certificate
-	// presented by the server and any host name in that certificate.
-	// In this mode, TLS is susceptible to machine-in-the-middle attacks.
-	// This should be used only for testing.
+	// InsecureSkipVerify controls whether a client verifies the server's
+	// certificate chain and host name. If InsecureSkipVerify is true, crypto/tls
+	// accepts any certificate presented by the server and any host name in that
+	// certificate. In this mode, TLS is susceptible to machine-in-the-middle
+	// attacks unless custom verification is used. This should be used only for
+	// testing or in combination with VerifyConnection or VerifyPeerCertificate.
 	InsecureSkipVerify bool
 
 	// CipherSuites is a list of supported cipher suites for TLS versions up to
@@ -681,9 +743,12 @@ func (c *Config) ticketKeyFromBytes(b [32]byte) (key ticketKey) {
 // ticket, and the lifetime we set for tickets we send.
 const maxSessionTicketLifetime = 7 * 24 * time.Hour
 
-// Clone returns a shallow clone of c. It is safe to clone a Config that is
+// Clone returns a shallow clone of c or nil if c is nil. It is safe to clone a Config that is
 // being used concurrently by a TLS client or server.
 func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return &Config{

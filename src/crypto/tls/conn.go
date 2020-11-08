@@ -168,18 +168,18 @@ type halfConn struct {
 	trafficSecret []byte // current TLS 1.3 traffic secret
 }
 
-type permamentError struct {
+type permanentError struct {
 	err net.Error
 }
 
-func (e *permamentError) Error() string   { return e.err.Error() }
-func (e *permamentError) Unwrap() error   { return e.err }
-func (e *permamentError) Timeout() bool   { return e.err.Timeout() }
-func (e *permamentError) Temporary() bool { return false }
+func (e *permanentError) Error() string   { return e.err.Error() }
+func (e *permanentError) Unwrap() error   { return e.err }
+func (e *permanentError) Timeout() bool   { return e.err.Timeout() }
+func (e *permanentError) Temporary() bool { return false }
 
 func (hc *halfConn) setErrorLocked(err error) error {
 	if e, ok := err.(net.Error); ok {
-		hc.err = &permamentError{err: e}
+		hc.err = &permanentError{err: e}
 	} else {
 		hc.err = err
 	}
@@ -1070,17 +1070,21 @@ func (c *Conn) readHandshake() (interface{}, error) {
 }
 
 var (
-	errClosed   = errors.New("tls: use of closed connection")
 	errShutdown = errors.New("tls: protocol is shutdown")
 )
 
 // Write writes data to the connection.
+//
+// As Write calls Handshake, in order to prevent indefinite blocking a deadline
+// must be set for both Read and Write before Write is called when the handshake
+// has not yet completed. See SetDeadline, SetReadDeadline, and
+// SetWriteDeadline.
 func (c *Conn) Write(b []byte) (int, error) {
 	// interlock with Close below
 	for {
 		x := atomic.LoadInt32(&c.activeCall)
 		if x&1 != 0 {
-			return 0, errClosed
+			return 0, net.ErrClosed
 		}
 		if atomic.CompareAndSwapInt32(&c.activeCall, x, x+2) {
 			break
@@ -1233,8 +1237,12 @@ func (c *Conn) handleKeyUpdate(keyUpdate *keyUpdateMsg) error {
 	return nil
 }
 
-// Read can be made to time out and return a net.Error with Timeout() == true
-// after a fixed time limit; see SetDeadline and SetReadDeadline.
+// Read reads data from the connection.
+//
+// As Read calls Handshake, in order to prevent indefinite blocking a deadline
+// must be set for both Read and Write before Read is called when the handshake
+// has not yet completed. See SetDeadline, SetReadDeadline, and
+// SetWriteDeadline.
 func (c *Conn) Read(b []byte) (int, error) {
 	if err := c.Handshake(); err != nil {
 		return 0, err
@@ -1285,7 +1293,7 @@ func (c *Conn) Close() error {
 	for {
 		x = atomic.LoadInt32(&c.activeCall)
 		if x&1 != 0 {
-			return errClosed
+			return net.ErrClosed
 		}
 		if atomic.CompareAndSwapInt32(&c.activeCall, x, x|1) {
 			break
@@ -1302,9 +1310,10 @@ func (c *Conn) Close() error {
 	}
 
 	var alertErr error
-
 	if c.handshakeComplete() {
-		alertErr = c.closeNotify()
+		if err := c.closeNotify(); err != nil {
+			alertErr = fmt.Errorf("tls: failed to send closeNotify alert (but connection was closed anyway): %w", err)
+		}
 	}
 
 	if err := c.conn.Close(); err != nil {
@@ -1331,8 +1340,12 @@ func (c *Conn) closeNotify() error {
 	defer c.out.Unlock()
 
 	if !c.closeNotifySent {
+		// Set a Write Deadline to prevent possibly blocking forever.
+		c.SetWriteDeadline(time.Now().Add(time.Second * 5))
 		c.closeNotifyErr = c.sendAlertLocked(alertCloseNotify)
 		c.closeNotifySent = true
+		// Any subsequent writes will fail.
+		c.SetWriteDeadline(time.Now())
 	}
 	return c.closeNotifyErr
 }
