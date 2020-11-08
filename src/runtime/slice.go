@@ -138,6 +138,7 @@ func growslice(et *_type, old slice, cap int) slice {
 	if et.size == 0 {
 		// append should not create a slice with nil pointer but non-zero len.
 		// We assume that append doesn't need to preserve old.array in this case.
+		// 如果当前切片的大小为0，还调用了扩容方法，那么就新生成一个新的容量的切片返回。
 		return slice{unsafe.Pointer(&zerobase), old.len, cap}
 	}
 
@@ -257,12 +258,17 @@ func slicecopy(toPtr unsafe.Pointer, toLen int, fmPtr unsafe.Pointer, fmLen int,
 		return n
 	}
 
+	// 如果开启了竞争检测
+
 	if raceenabled {
 		callerpc := getcallerpc()
 		pc := funcPC(slicecopy)
 		racereadrangepc(fmPtr, uintptr(n*int(width)), callerpc, pc)
 		racewriterangepc(toPtr, uintptr(n*int(width)), callerpc, pc)
 	}
+
+	// 如果开启了 The memory sanitizer (msan)
+
 	if msanenabled {
 		msanread(fmPtr, uintptr(n*int(width)))
 		msanwrite(toPtr, uintptr(n*int(width)))
@@ -270,9 +276,11 @@ func slicecopy(toPtr unsafe.Pointer, toLen int, fmPtr unsafe.Pointer, fmLen int,
 
 	size := uintptr(n) * width
 	if size == 1 { // common case worth about 2x to do here
+		// 如果只有一个元素，那么指针直接转换即可
 		// TODO: is this still worth it with new memmove impl?
 		*(*byte)(toPtr) = *(*byte)(fmPtr) // known to be a byte pointer
 	} else {
+		// 如果不止一个元素，那么就把 size 个 bytes 从 fm.array 地址开始，拷贝到 to.array 地址之后
 		memmove(toPtr, fmPtr, size)
 	}
 	return n
