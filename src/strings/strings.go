@@ -8,7 +8,6 @@
 package strings
 
 import (
-	"internal/bytealg"
 	"unicode"
 	"unicode/utf8"
 )

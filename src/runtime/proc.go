@@ -3899,7 +3899,9 @@ func malg(stacksize int32) *g {
 //go:nosplit
 func newproc(siz int32, fn *funcval) {
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
+	// 获取当前的运行的g
 	gp := getg()
+	// getcallerpc返回其调用方的程序计数器（PC）。用于存放下一条指令所在单元的地址的地方。
 	pc := getcallerpc()
 	systemstack(func() {
 		newg := newproc1(fn, argp, siz, gp, pc)
